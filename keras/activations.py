@@ -19,6 +19,10 @@ def softplus(x):
     return K.softplus(x)
 
 
+def softsign(x):
+    return K.softsign(x)
+
+
 def relu(x, alpha=0., max_value=None):
     return K.relu(x, alpha=alpha, max_value=max_value)
 
@@ -44,4 +48,6 @@ def linear(x):
 
 from .utils.generic_utils import get_from_module
 def get(identifier):
+    if identifier is None:
+        return linear
     return get_from_module(identifier, globals(), 'activation function')

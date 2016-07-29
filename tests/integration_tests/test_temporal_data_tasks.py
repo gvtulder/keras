@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import string
 
-from keras.utils.test_utils import get_test_data
+from keras.utils.test_utils import get_test_data, keras_test
 from keras.utils.np_utils import to_categorical
 from keras.models import Sequential
 from keras.layers import TimeDistributedDense
@@ -14,6 +14,7 @@ from keras.layers import LSTM
 from keras.layers import Embedding
 
 
+@keras_test
 def test_temporal_classification():
     '''
     Classify temporal sequences of float numbers
@@ -23,7 +24,7 @@ def test_temporal_classification():
     '''
     np.random.seed(1337)
     (X_train, y_train), (X_test, y_test) = get_test_data(nb_train=500,
-                                                         nb_test=200,
+                                                         nb_test=500,
                                                          input_shape=(3, 5),
                                                          classification=True,
                                                          nb_class=2)
@@ -35,14 +36,15 @@ def test_temporal_classification():
                   input_shape=(X_train.shape[1], X_train.shape[2]),
                   activation='softmax'))
     model.compile(loss='categorical_crossentropy',
-                  optimizer='adadelta',
+                  optimizer='adagrad',
                   metrics=['accuracy'])
-    history = model.fit(X_train, y_train, nb_epoch=5, batch_size=16,
+    history = model.fit(X_train, y_train, nb_epoch=20, batch_size=32,
                         validation_data=(X_test, y_test),
                         verbose=0)
-    assert(history.history['val_acc'][-1] > 0.9)
+    assert(history.history['val_acc'][-1] >= 0.85)
 
 
+@keras_test
 def test_temporal_regression():
     '''
     Predict float numbers (regression) based on sequences
@@ -63,6 +65,7 @@ def test_temporal_regression():
     assert(history.history['val_loss'][-1] < 0.75)
 
 
+@keras_test
 def test_sequence_to_sequence():
     '''
     Apply a same Dense layer for each element of time dimension of the input
@@ -86,6 +89,7 @@ def test_sequence_to_sequence():
     assert(history.history['val_loss'][-1] < 0.8)
 
 
+@keras_test
 def test_stacked_lstm_char_prediction():
     '''
     Learn alphabetical char sequence with stacked LSTM.
@@ -135,6 +139,7 @@ def test_stacked_lstm_char_prediction():
     assert(generated == alphabet)
 
 
+@keras_test
 def test_masked_temporal():
     '''
     Confirm that even with masking on both inputs and outputs, cross-entropies are

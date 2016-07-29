@@ -5,6 +5,7 @@ import numpy as np
 
 from keras.backend import theano_backend as KTH
 from keras.backend import tensorflow_backend as KTF
+from keras.utils.np_utils import convert_kernel
 
 
 def check_single_tensor_operation(function_name, input_shape, **kwargs):
@@ -22,15 +23,39 @@ def check_single_tensor_operation(function_name, input_shape, **kwargs):
 def check_two_tensor_operation(function_name, x_input_shape,
                                y_input_shape, **kwargs):
     xval = np.random.random(x_input_shape) - 0.5
+
     xth = KTH.variable(xval)
     xtf = KTF.variable(xval)
 
     yval = np.random.random(y_input_shape) - 0.5
+
     yth = KTH.variable(yval)
     ytf = KTF.variable(yval)
 
     zth = KTH.eval(getattr(KTH, function_name)(xth, yth, **kwargs))
     ztf = KTF.eval(getattr(KTF, function_name)(xtf, ytf, **kwargs))
+
+    assert zth.shape == ztf.shape
+    assert_allclose(zth, ztf, atol=1e-05)
+
+
+def check_composed_tensor_operations(first_function_name, first_function_args,
+                                     second_function_name, second_function_args,
+                                     input_shape):
+    ''' Creates a random tensor t0 with shape input_shape and compute
+                 t1 = first_function_name(t0, **first_function_args)
+                 t2 = second_function_name(t1, **second_function_args)
+        with both Theano and TensorFlow backends and ensures the answers match.
+    '''
+    val = np.random.random(input_shape) - 0.5
+    xth = KTH.variable(val)
+    xtf = KTF.variable(val)
+
+    yth = getattr(KTH, first_function_name)(xth, **first_function_args)
+    ytf = getattr(KTF, first_function_name)(xtf, **first_function_args)
+
+    zth = KTH.eval(getattr(KTH, second_function_name)(yth, **second_function_args))
+    ztf = KTF.eval(getattr(KTF, second_function_name)(ytf, **second_function_args))
 
     assert zth.shape == ztf.shape
     assert_allclose(zth, ztf, atol=1e-05)
@@ -67,6 +92,9 @@ class TestBackend(object):
         check_single_tensor_operation('expand_dims', (4, 3), dim=-1)
         check_single_tensor_operation('expand_dims', (4, 3, 2), dim=1)
         check_single_tensor_operation('squeeze', (4, 3, 1), axis=2)
+        check_composed_tensor_operations('reshape', {'shape':(4,3,1,1)},
+                                         'squeeze', {'axis':2},
+                                         (4, 3, 1, 1))
 
     def test_repeat_elements(self):
         reps = 3
@@ -87,6 +115,17 @@ class TestBackend(object):
                 assert tf_rep.shape == np_rep.shape
                 assert_allclose(np_rep, th_rep, atol=1e-05)
                 assert_allclose(np_rep, tf_rep, atol=1e-05)
+
+    def test_tile(self):
+        shape = (3, 4)
+        arr = np.arange(np.prod(shape)).reshape(shape)
+        arr_th = KTH.variable(arr)
+        arr_tf = KTF.variable(arr)
+
+        n = (2, 1)
+        th_rep = KTH.eval(KTH.tile(arr_th, n))
+        tf_rep = KTF.eval(KTF.tile(arr_tf, n))
+        assert_allclose(tf_rep, th_rep, atol=1e-05)
 
     def test_value_manipulation(self):
         val = np.random.random((4, 2))
@@ -112,6 +151,12 @@ class TestBackend(object):
         # count_params
         assert KTH.count_params(xth) == KTF.count_params(xtf)
 
+        # print_tensor
+        check_single_tensor_operation('print_tensor', ())
+        check_single_tensor_operation('print_tensor', (2,))
+        check_single_tensor_operation('print_tensor', (4, 3))
+        check_single_tensor_operation('print_tensor', (1, 2, 3))
+
     def test_elementwise_operations(self):
         check_single_tensor_operation('max', (4, 2))
         check_single_tensor_operation('max', (4, 2), axis=1, keepdims=True)
@@ -136,6 +181,9 @@ class TestBackend(object):
         # does not work yet, wait for bool <-> int casting in TF (coming soon)
         # check_single_tensor_operation('any', (4, 2))
         # check_single_tensor_operation('any', (4, 2), axis=1, keepdims=True)
+        #
+        # check_single_tensor_operation('any', (4, 2))
+        # check_single_tensor_operation('any', (4, 2), axis=1, keepdims=True)
 
         check_single_tensor_operation('argmax', (4, 2))
         check_single_tensor_operation('argmax', (4, 2), axis=1)
@@ -156,6 +204,11 @@ class TestBackend(object):
 
         # two-tensor ops
         check_two_tensor_operation('equal', (4, 2), (4, 2))
+        check_two_tensor_operation('not_equal', (4, 2), (4, 2))
+        check_two_tensor_operation('greater', (4, 2), (4, 2))
+        check_two_tensor_operation('greater_equal', (4, 2), (4, 2))
+        check_two_tensor_operation('lesser', (4, 2), (4, 2))
+        check_two_tensor_operation('lesser_equal', (4, 2), (4, 2))
         check_two_tensor_operation('maximum', (4, 2), (4, 2))
         check_two_tensor_operation('minimum', (4, 2), (4, 2))
 
@@ -168,14 +221,24 @@ class TestBackend(object):
         exptf = xtf * KTF.exp(xtf)
         lossth = KTH.sum(expth)
         losstf = KTF.sum(exptf)
+        zero_lossth = KTH.stop_gradient(lossth)
+        zero_losstf = KTF.stop_gradient(losstf)
 
         gradth = KTH.gradients(lossth, [expth])
         gradtf = KTF.gradients(losstf, [exptf])
+        zero_gradth = KTH.gradients(lossth + zero_lossth, [expth])
+        zero_gradtf = KTF.gradients(losstf + zero_losstf, [exptf])
 
         zth = KTH.eval(gradth[0])
         ztf = KTF.eval(gradtf[0])
+        zero_zth = KTH.eval(zero_gradth[0])
+        zero_ztf = KTF.eval(zero_gradtf[0])
         assert zth.shape == ztf.shape
+        assert zero_zth.shape == zero_ztf.shape
         assert_allclose(zth, ztf, atol=1e-05)
+        assert_allclose(zero_zth, zero_ztf, atol=1e-05)
+        assert_allclose(zero_zth, zth, atol=1e-05)
+        assert_allclose(zero_ztf, ztf, atol=1e-05)
 
     def test_function(self):
         val = np.random.random((4, 2))
@@ -369,42 +432,111 @@ class TestBackend(object):
         check_single_tensor_operation('l2_normalize', (4, 3), axis=-1)
         check_single_tensor_operation('l2_normalize', (4, 3), axis=1)
 
-    # def test_conv2d(self):
-    #     '''conv2d works "properly" with Theano and TF but outputs different
-    #     values in each case. Cause unclear (input / kernel shape format?)
-    #     '''
-    #     # TH kernel shape: (depth, input_depth, rows, cols)
-    #     check_two_tensor_operation('conv2d', (5, 3, 10, 12), (4, 3, 2, 2),
-    #                                strides=(1, 1), border_mode='valid')
-    #     check_two_tensor_operation('conv2d', (5, 3, 10, 12), (4, 3, 2, 2),
-    #                                strides=(1, 1), border_mode='same')
+    def test_conv2d(self):
+        # TH kernel shape: (depth, input_depth, rows, cols)
+        # TF kernel shape: (rows, cols, input_depth, depth)
 
-    #     # TF kernel shape: (rows, cols, input_depth, depth)
-    #     check_two_tensor_operation('conv2d', (5, 10, 12, 3), (2, 2, 3, 4),
-    #                                strides=(1, 1), border_mode='valid', dim_ordering='tf')
-    #     check_two_tensor_operation('conv2d', (5, 10, 12, 3), (2, 2, 3, 4),
-    #                                strides=(1, 1), border_mode='same', dim_ordering='tf')
+        for input_shape in [(2, 3, 4, 5), (2, 3, 5, 6)]:
+            for kernel_shape in [(4, 3, 2, 2), (4, 3, 3, 4)]:
+                xval = np.random.random(input_shape)
 
-    #     check_two_tensor_operation('conv2d', (5, 3, 10, 12), (4, 3, 3, 3),
-    #                                strides=(1, 1), border_mode='valid')
-    #     check_two_tensor_operation('conv2d', (5, 3, 10, 12), (4, 3, 3, 3),
-    #                                strides=(1, 1), border_mode='same')
+                xth = KTH.variable(xval)
+                xtf = KTF.variable(xval)
 
-    #     check_two_tensor_operation('conv2d', (5, 3, 10, 12), (4, 3, 3, 3),
-    #                                strides=(2, 2), border_mode='valid')
+                kernel_val = np.random.random(kernel_shape) - 0.5
 
-    # def test_pool2d(self):
-    #     '''pool2d works "properly" with Theano and TF but outputs different
-    #     values in each case. Cause unclear (input shape format?)
-    #     '''
-    #     check_single_tensor_operation('pool2d', (5, 3, 10, 12), pool_size=(2, 2),
-    #                                   strides=(1, 1), border_mode='valid')
+                kernel_th = KTH.variable(convert_kernel(kernel_val))
+                kernel_tf = KTF.variable(kernel_val)
 
-    #     check_single_tensor_operation('pool2d', (5, 3, 9, 11), pool_size=(2, 2),
-    #                                   strides=(1, 1), border_mode='valid')
+                zth = KTH.eval(KTH.conv2d(xth, kernel_th))
+                ztf = KTF.eval(KTF.conv2d(xtf, kernel_tf))
 
-    #     check_single_tensor_operation('pool2d', (5, 3, 9, 11), pool_size=(2, 3),
-    #                                   strides=(1, 1), border_mode='valid')
+                assert zth.shape == ztf.shape
+                assert_allclose(zth, ztf, atol=1e-05)
+
+        input_shape = (1, 6, 5, 3)
+        kernel_shape = (3, 3, 3, 2)
+
+        xval = np.random.random(input_shape)
+
+        xth = KTH.variable(xval)
+        xtf = KTF.variable(xval)
+
+        kernel_val = np.random.random(kernel_shape) - 0.5
+
+        kernel_th = KTH.variable(convert_kernel(kernel_val, dim_ordering='tf'))
+        kernel_tf = KTF.variable(kernel_val)
+
+        zth = KTH.eval(KTH.conv2d(xth, kernel_th, dim_ordering='tf'))
+        ztf = KTF.eval(KTF.conv2d(xtf, kernel_tf, dim_ordering='tf'))
+
+        assert zth.shape == ztf.shape
+        assert_allclose(zth, ztf, atol=1e-05)
+
+    def test_conv3d(self):
+        # TH input shape: (samples, input_depth, conv_dim1, conv_dim2, conv_dim3)
+        # TF input shape: (samples, conv_dim1, conv_dim2, conv_dim3, input_depth)
+        # TH kernel shape: (depth, input_depth, x, y, z)
+        # TF kernel shape: (x, y, z, input_depth, depth)
+
+        # test in dim_ordering = th
+        for input_shape in [(2, 3, 4, 5, 4), (2, 3, 5, 4, 6)]:
+            for kernel_shape in [(4, 3, 2, 2, 2), (4, 3, 3, 2, 4)]:
+                xval = np.random.random(input_shape)
+
+                xth = KTH.variable(xval)
+                xtf = KTF.variable(xval)
+
+                kernel_val = np.random.random(kernel_shape) - 0.5
+
+                kernel_th = KTH.variable(convert_kernel(kernel_val))
+                kernel_tf = KTF.variable(kernel_val)
+
+                zth = KTH.eval(KTH.conv3d(xth, kernel_th))
+                ztf = KTF.eval(KTF.conv3d(xtf, kernel_tf))
+
+                assert zth.shape == ztf.shape
+                assert_allclose(zth, ztf, atol=1e-05)
+
+        # test in dim_ordering = tf
+        input_shape = (1, 2, 2, 2, 1)
+        kernel_shape = (2, 2, 2, 1, 1)
+
+        xval = np.random.random(input_shape)
+
+        xth = KTH.variable(xval)
+        xtf = KTF.variable(xval)
+
+        kernel_val = np.random.random(kernel_shape) - 0.5
+
+        kernel_th = KTH.variable(convert_kernel(kernel_val, dim_ordering='tf'))
+        kernel_tf = KTF.variable(kernel_val)
+
+        zth = KTH.eval(KTH.conv3d(xth, kernel_th, dim_ordering='tf'))
+        ztf = KTF.eval(KTF.conv3d(xtf, kernel_tf, dim_ordering='tf'))
+
+        assert zth.shape == ztf.shape
+        assert_allclose(zth, ztf, atol=1e-05)
+
+    def test_pool2d(self):
+        check_single_tensor_operation('pool2d', (5, 3, 10, 12), pool_size=(2, 2),
+                                      strides=(1, 1), border_mode='valid')
+
+        check_single_tensor_operation('pool2d', (5, 3, 9, 11), pool_size=(2, 2),
+                                      strides=(1, 1), border_mode='valid')
+
+        check_single_tensor_operation('pool2d', (5, 3, 9, 11), pool_size=(2, 3),
+                                      strides=(1, 1), border_mode='valid')
+
+    def test_pool3d(self):
+        check_single_tensor_operation('pool3d', (5, 3, 10, 12, 5), pool_size=(2, 2, 2),
+                                      strides=(1, 1, 1), border_mode='valid')
+
+        check_single_tensor_operation('pool3d', (5, 3, 9, 11, 5), pool_size=(2, 2, 2),
+                                      strides=(1, 1, 1), border_mode='valid')
+
+        check_single_tensor_operation('pool3d', (5, 3, 9, 11, 5), pool_size=(2, 3, 2),
+                                      strides=(1, 1, 1), border_mode='valid')
 
     def test_random_normal(self):
         mean = 0.

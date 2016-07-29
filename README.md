@@ -2,6 +2,7 @@
 
 [![Build Status](https://travis-ci.org/fchollet/keras.svg?branch=master)](https://travis-ci.org/fchollet/keras)
 [![PyPI version](https://badge.fury.io/py/keras.svg)](https://badge.fury.io/py/keras)
+[![license](https://img.shields.io/github/license/mashape/apistatus.svg?maxAge=2592000)](https://github.com/fchollet/keras/blob/master/LICENSE)
 
 ## You have just found Keras.
 
@@ -38,7 +39,7 @@ Keras is compatible with: __Python 2.7-3.5__.
 
 ## Getting started: 30 seconds to Keras
 
-The core data structure of Keras is a __model__, a way to organize layers. The main type of model is the [`Sequential`](http://keras.io/getting-started/sequential-model-guide) model, a linear stack of layers. For more complex architectures, you should use the [Keras function API](http://keras.io/getting-started/functional-api-guide).
+The core data structure of Keras is a __model__, a way to organize layers. The main type of model is the [`Sequential`](http://keras.io/getting-started/sequential-model-guide) model, a linear stack of layers. For more complex architectures, you should use the [Keras functional API](http://keras.io/getting-started/functional-api-guide).
 
 Here's the `Sequential` model:
 
@@ -51,7 +52,7 @@ model = Sequential()
 Stacking layers is as easy as `.add()`:
 
 ```python
-from keras.layers.core import Dense, Activation
+from keras.layers import Dense, Activation
 
 model.add(Dense(output_dim=64, input_dim=100))
 model.add(Activation("relu"))

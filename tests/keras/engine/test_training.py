@@ -7,8 +7,10 @@ from keras.engine.topology import merge, Input
 from keras.engine.training import Model
 from keras.models import Sequential, Graph
 from keras import backend as K
+from keras.utils.test_utils import keras_test
 
 
+@keras_test
 def test_model_methods():
     a = Input(shape=(3,), name='input_a')
     b = Input(shape=(3,), name='input_b')
@@ -117,10 +119,10 @@ def test_model_methods():
 
     out = model.train_on_batch([input_a_np, input_b_np],
                                [output_a_np, output_b_np])
-    assert len(out) == 3
+    assert len(out) == 5
     out = model.test_on_batch([input_a_np, input_b_np],
                               [output_a_np, output_b_np])
-    assert len(out) == 3
+    assert len(out) == 5
 
     # this should also work
     model.compile(optimizer, loss, metrics={'dense_1': 'acc'},
@@ -128,10 +130,10 @@ def test_model_methods():
 
     out = model.train_on_batch([input_a_np, input_b_np],
                                [output_a_np, output_b_np])
-    assert len(out) == 2
+    assert len(out) == 4
     out = model.test_on_batch([input_a_np, input_b_np],
                               [output_a_np, output_b_np])
-    assert len(out) == 2
+    assert len(out) == 4
 
     # and this as well
     model.compile(optimizer, loss, metrics={'dense_1': ['acc']},
@@ -139,10 +141,22 @@ def test_model_methods():
 
     out = model.train_on_batch([input_a_np, input_b_np],
                                [output_a_np, output_b_np])
-    assert len(out) == 2
+    assert len(out) == 4
     out = model.test_on_batch([input_a_np, input_b_np],
                               [output_a_np, output_b_np])
-    assert len(out) == 2
+    assert len(out) == 4
+
+    # test with a custom metric function
+    mse = lambda y_true, y_pred: K.mean(K.pow(y_true - y_pred, 2))
+    model.compile(optimizer, loss, metrics=[mse],
+                  sample_weight_mode=None)
+
+    out = model.train_on_batch([input_a_np, input_b_np],
+                               [output_a_np, output_b_np])
+    assert len(out) == 5
+    out = model.test_on_batch([input_a_np, input_b_np],
+                              [output_a_np, output_b_np])
+    assert len(out) == 5
 
     input_a_np = np.random.random((10, 3))
     input_b_np = np.random.random((10, 3))
@@ -155,6 +169,7 @@ def test_model_methods():
     out = model.predict([input_a_np, input_b_np], batch_size=4)
 
 
+@keras_test
 def test_trainable_argument():
     x = np.random.random((5, 3))
     y = np.random.random((5, 2))

@@ -1108,12 +1108,12 @@ def conv3d(x, kernel, strides=(1, 1, 1),
            volume_shape=None, filter_shape=None):
     '''
     Run on cuDNN if available.
-    border_mode: string, "same" or "valid".
+    border_mode: string, "same", "valid" or "full".
     '''
     if dim_ordering not in {'th', 'tf'}:
         raise Exception('Unknown dim_ordering ' + str(dim_ordering))
 
-    if border_mode not in {'same', 'valid'}:
+    if border_mode not in {'same', 'valid', 'full'}:
         raise Exception('Invalid border mode: ' + str(border_mode))
 
     if dim_ordering == 'tf':

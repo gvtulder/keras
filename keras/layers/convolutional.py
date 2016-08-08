@@ -842,7 +842,7 @@ class Convolution3D(Layer):
             If you don't specify anything, no activation is applied
             (ie. "linear" activation: a(x) = x).
         weights: list of Numpy arrays to set as initial weights.
-        border_mode: 'valid' or 'same'.
+        border_mode: 'valid', 'same' or 'full'.
         subsample: tuple of length 3. Factor by which to subsample output.
             Also called strides elsewhere.
             Note: 'subsample' is implemented by slicing the output of conv3d with strides=(1,1,1).
@@ -883,7 +883,7 @@ class Convolution3D(Layer):
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
                  bias=True, **kwargs):
-        if border_mode not in {'valid', 'same'}:
+        if border_mode not in {'valid', 'same', 'full'}:
             raise Exception('Invalid border mode for Convolution3D:', border_mode)
         self.nb_filter = nb_filter
         self.kernel_dim1 = kernel_dim1
@@ -891,7 +891,7 @@ class Convolution3D(Layer):
         self.kernel_dim3 = kernel_dim3
         self.init = initializations.get(init, dim_ordering=dim_ordering)
         self.activation = activations.get(activation)
-        assert border_mode in {'valid', 'same'}, 'border_mode must be in {valid, same}'
+        assert border_mode in {'valid', 'same', 'full'}, 'border_mode must be in {valid, same, full}'
         self.border_mode = border_mode
         self.subsample = tuple(subsample)
         assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'

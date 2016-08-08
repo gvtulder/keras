@@ -245,9 +245,9 @@ def test_convolution_3d():
     input_len_dim2 = 11
     input_len_dim3 = 12
 
-    for border_mode in ['same', 'valid']:
+    for border_mode in ['same', 'valid', 'full']:
         for subsample in [(1, 1, 1), (2, 2, 2)]:
-            if border_mode == 'same' and subsample != (1, 1, 1):
+            if border_mode in {'same', 'full'} and subsample != (1, 1, 1):
                 continue
 
             layer_test(convolutional.Convolution3D,

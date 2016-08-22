@@ -3,6 +3,7 @@ from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.tensor.signal import pool
 from theano.tensor.nnet import conv3d2d
+from theano.sandbox.cuda import dnn
 from theano.printing import Print
 try:
     from theano.tensor.nnet.nnet import softsign as T_softsign
@@ -987,6 +988,16 @@ def _preprocess_conv2d_input(x, dim_ordering):
     return x
 
 
+def _preprocess_conv3d_input(x, dim_ordering):
+    if dim_ordering == 'tf':
+        # TF uses the last dimension as channel dimension,
+        # instead of the 2nd one.
+        # TH input shape: (samples, input_depth, dim1, dim2, dim3)
+        # TF input shape: (samples, dim1, dim2, dim3, input_depth)
+        x = x.dimshuffle((0, 4, 1, 2, 3))
+    return x
+
+
 def _preprocess_conv2d_kernel(kernel, dim_ordering):
     if dim_ordering == 'tf':
         # TF uses the last dimension as channel dimension,
@@ -997,11 +1008,23 @@ def _preprocess_conv2d_kernel(kernel, dim_ordering):
     return kernel
 
 
+def _preprocess_conv3d_kernel(kernel, dim_ordering):
+    if dim_ordering == 'tf':
+        # TF uses the last dimension as channel dimension,
+        # instead of the 2nd one.
+        # TH kernel shape: (depth, input_depth, dim1, dim2, dim3)
+        # TF kernel shape: (dim1, dim2, dim3, input_depth, depth)
+        kernel = kernel.dimshuffle((4, 3, 0, 1, 2))
+    return kernel
+
+
 def _preprocess_border_mode(border_mode):
     if border_mode == 'same':
         th_border_mode = 'half'
     elif border_mode == 'valid':
         th_border_mode = 'valid'
+    elif border_mode == 'full':
+        th_border_mode = 'full'
     else:
         raise Exception('Border mode not supported: ' + str(border_mode))
     return th_border_mode
@@ -1016,8 +1039,8 @@ def _preprocess_image_shape(dim_ordering, image_shape):
             return None
     if dim_ordering == 'tf':
         if image_shape:
-            image_shape = (image_shape[0], image_shape[3],
-                           image_shape[1], image_shape[2])
+            image_shape = ((image_shape[0], image_shape[-1]) +
+                           image_shape[1:-1])
     if image_shape is not None:
         image_shape = tuple(int_or_none(v) for v in image_shape)
     return image_shape
@@ -1032,8 +1055,8 @@ def _preprocess_filter_shape(dim_ordering, filter_shape):
             return None
     if dim_ordering == 'tf':
         if filter_shape:
-            filter_shape = (filter_shape[3], filter_shape[2],
-                            filter_shape[0], filter_shape[1])
+            filter_shape = ((filter_shape[-1], filter_shape[-2]) +
+                            filter_shape[0:-2])
     if filter_shape is not None:
         filter_shape = tuple(int_or_none(v) for v in filter_shape)
     return filter_shape
@@ -1047,6 +1070,19 @@ def _postprocess_conv2d_output(conv_out, x, border_mode, np_kernel, strides, dim
             conv_out = conv_out[:, :, :, :(x.shape[3] + strides[1] - 1) // strides[1]]
     if dim_ordering == 'tf':
         conv_out = conv_out.dimshuffle((0, 2, 3, 1))
+    return conv_out
+
+
+def _postprocess_conv3d_output(conv_out, x, border_mode, np_kernel, strides, dim_ordering):
+    if border_mode == 'same':
+        if np_kernel.shape[2] % 2 == 0:
+            conv_out = conv_out[:, :, :(x.shape[2] + strides[0] - 1) // strides[0], :, :]
+        if np_kernel.shape[3] % 2 == 0:
+            conv_out = conv_out[:, :, :, :(x.shape[3] + strides[1] - 1) // strides[1], :]
+        if np_kernel.shape[4] % 2 == 0:
+            conv_out = conv_out[:, :, :, :, :(x.shape[4] + strides[2] - 1) // strides[2]]
+    if dim_ordering == 'tf':
+        conv_out = conv_out.dimshuffle((0, 2, 3, 4, 1))
     return conv_out
 
 
@@ -1145,7 +1181,40 @@ def separable_conv2d(x, depthwise_kernel, pointwise_kernel, strides=(1, 1),
 
 def conv3d(x, kernel, strides=(1, 1, 1),
            border_mode='valid', dim_ordering='th',
-           volume_shape=None, filter_shape=None):
+           volume_shape=None, filter_shape=None,
+           filter_dilation=(1, 1, 1)):
+    '''3D convolution.
+
+    # Arguments
+        kernel: kernel tensor.
+        strides: strides tuple.
+        border_mode: string, "same" or "valid".
+        dim_ordering: "tf" or "th".
+            Whether to use Theano or TensorFlow dimension ordering
+        in inputs/kernels/ouputs.
+    '''
+    if dim_ordering not in {'th', 'tf'}:
+        raise Exception('Unknown dim_ordering ' + str(dim_ordering))
+
+    x = _preprocess_conv3d_input(x, dim_ordering)
+    kernel = _preprocess_conv3d_kernel(kernel, dim_ordering)
+    th_border_mode = _preprocess_border_mode(border_mode)
+    np_kernel = kernel.eval()
+    volume_shape = _preprocess_image_shape(dim_ordering, volume_shape)
+    filter_shape = _preprocess_filter_shape(dim_ordering, filter_shape)
+
+    conv_out = T.nnet.conv3d(x, kernel,
+                             border_mode=th_border_mode,
+                             subsample=strides,
+                             input_shape=volume_shape,
+                             filter_shape=filter_shape,
+                             filter_dilation=filter_dilation)
+
+    conv_out = _postprocess_conv3d_output(conv_out, x, border_mode, np_kernel,
+                                          strides, dim_ordering)
+    return conv_out
+
+    # TODO old
     '''
     Run on cuDNN if available.
     border_mode: string, "same", "valid" or "full".
@@ -1155,6 +1224,10 @@ def conv3d(x, kernel, strides=(1, 1, 1),
 
     if border_mode not in {'same', 'valid', 'full'}:
         raise Exception('Invalid border mode: ' + str(border_mode))
+
+    if dim_ordering == 'th' and strides == (1, 1, 1):
+        conv_out = dnn.dnn_conv3d(x, kernel, border_mode=border_mode)
+        return conv_out
 
     if dim_ordering == 'tf':
         # TF uses the last dimension as channel dimension,
@@ -1255,7 +1328,7 @@ def pool3d(x, pool_size, strides=(1, 1, 1), border_mode='valid',
         raise Exception('border_mode="same" not supported with Theano.')
     elif border_mode == 'valid':
         ignore_border = True
-        padding = (0, 0)
+        padding = (0, 0, 0)
     else:
         raise Exception('Invalid border mode: ' + str(border_mode))
 
@@ -1266,36 +1339,13 @@ def pool3d(x, pool_size, strides=(1, 1, 1), border_mode='valid',
         x = x.dimshuffle((0, 4, 1, 2, 3))
 
     if pool_mode == 'max':
-        # pooling over conv_dim2, conv_dim1 (last two channels)
-        output = pool.pool_2d(input=x.dimshuffle(0, 1, 4, 3, 2),
-                              ds=(pool_size[1], pool_size[0]),
-                              st=(strides[1], strides[0]),
-                              ignore_border=ignore_border,
-                              padding=padding,
-                              mode='max')
-
-        # pooling over conv_dim3
-        pool_out = pool.pool_2d(input=output.dimshuffle(0, 1, 4, 3, 2),
-                                ds=(1, pool_size[2]),
-                                st=(1, strides[2]),
-                                ignore_border=ignore_border,
+        pool_out = pool.pool_3d(x, ds=pool_size, st=strides,
+                                ignore_border=True,
                                 padding=padding,
                                 mode='max')
-
     elif pool_mode == 'avg':
-        # pooling over conv_dim2, conv_dim1 (last two channels)
-        output = pool.pool_2d(input=x.dimshuffle(0, 1, 4, 3, 2),
-                              ds=(pool_size[1], pool_size[0]),
-                              st=(strides[1], strides[0]),
-                              ignore_border=ignore_border,
-                              padding=padding,
-                              mode='average_exc_pad')
-
-        # pooling over conv_dim3
-        pool_out = pool.pool_2d(input=output.dimshuffle(0, 1, 4, 3, 2),
-                                ds=(1, pool_size[2]),
-                                st=(1, strides[2]),
-                                ignore_border=ignore_border,
+        pool_out = pool.pool_3d(x, ds=pool_size, st=strides,
+                                ignore_border=True,
                                 padding=padding,
                                 mode='average_exc_pad')
     else:

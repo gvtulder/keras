@@ -665,7 +665,7 @@ class Dense(Layer):
                  activation=None, weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
-                 bias=True, input_dim=None, **kwargs):
+                 reverse_weights=False, bias=True, input_dim=None, **kwargs):
         self.init = initializations.get(init)
         self.activation = activations.get(activation)
         self.output_dim = output_dim
@@ -678,6 +678,9 @@ class Dense(Layer):
         self.W_constraint = constraints.get(W_constraint)
         self.b_constraint = constraints.get(b_constraint)
 
+        self.W = None
+        self.reverse_weights = reverse_weights
+
         self.bias = bias
         self.initial_weights = weights
         self.input_spec = [InputSpec(ndim=2)]
@@ -686,14 +689,21 @@ class Dense(Layer):
             kwargs['input_shape'] = (self.input_dim,)
         super(Dense, self).__init__(**kwargs)
 
+    def reuse_W(self, W, reverse_weights=False):
+        assert not self.built
+        self.W = W
+        self.reverse_weights = reverse_weights
+
     def build(self, input_shape):
         assert len(input_shape) == 2
         input_dim = input_shape[1]
         self.input_spec = [InputSpec(dtype=K.floatx(),
                                      shape=(None, input_dim))]
 
-        self.W = self.init((input_dim, self.output_dim),
-                           name='{}_W'.format(self.name))
+        if self.W is None:
+            self.W = self.init((input_dim, self.output_dim),
+                               name='{}_W'.format(self.name))
+
         if self.bias:
             self.b = K.zeros((self.output_dim,),
                              name='{}_b'.format(self.name))
@@ -725,7 +735,17 @@ class Dense(Layer):
             del self.initial_weights
 
     def call(self, x, mask=None):
-        output = K.dot(x, self.W)
+        W_for_dot = self.W
+        if self.reverse_weights:
+            # swap input channel / output channel
+            # input_dim = 2  output_dim = 3
+            # (3, 4, 0, 1, 2)
+            input_ndim = x.ndim - 1
+            output_ndim = self.W.ndim - input_ndim
+            new_dim_order = (range(output_ndim, input_ndim + output_ndim) +
+                             range(output_ndim))
+            W_for_dot = W_for_dot.dimshuffle(*new_dim_order)
+        output = K.dot(x, W_for_dot)
         if self.bias:
             output += self.b
         return self.activation(output)

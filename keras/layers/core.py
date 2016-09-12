@@ -763,6 +763,7 @@ class Dense(Layer):
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
                   'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
                   'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
+                  'reverse_weights': self.reverse_weights,
                   'bias': self.bias,
                   'input_dim': self.input_dim}
         base_config = super(Dense, self).get_config()

@@ -158,6 +158,18 @@ def test_model_methods():
                               [output_a_np, output_b_np])
     assert len(out) == 5
 
+    # test with a custom metric variable
+    intermediate_value = K.sum(K.std(b_2, axis=-1))
+    model.compile(optimizer, loss, sample_weight_mode=None,
+                  extra_metrics={'t': intermediate_value})
+
+    out = model.train_on_batch([input_a_np, input_b_np],
+                               [output_a_np, output_b_np])
+    assert len(out) == 4
+    out = model.test_on_batch([input_a_np, input_b_np],
+                              [output_a_np, output_b_np])
+    assert len(out) == 4
+
     input_a_np = np.random.random((10, 3))
     input_b_np = np.random.random((10, 3))
 

@@ -456,7 +456,7 @@ def generator_queue(generator, max_q_size=10,
 class Model(Container):
 
     def compile(self, optimizer, loss, metrics=[], loss_weights=None,
-                sample_weight_mode=None, **kwargs):
+                sample_weight_mode=None, extra_metrics={}, **kwargs):
         '''Configures the model for training.
 
         # Arguments
@@ -472,6 +472,9 @@ class Model(Container):
                 To specify different metrics for different outputs of a
                 multi-output model, you could also pass a dictionary,
                 such as `metrics={'output_a': 'accuracy'}`.
+            extra_metrics: dictionary of tensor variables to observe during
+                training and testing. These variables will be added to
+                the list of metrics.
             sample_weight_mode: if you need to do timestep-wise
                 sample weighting (2D weights), set this to "temporal".
                 "None" defaults to sample-wise weights (1D).
@@ -665,6 +668,11 @@ class Model(Container):
                         self.metrics_names.append(metric_fn.__name__)
                     else:
                         self.metrics_names.append(self.output_layers[i].name + '_' + metric_fn.__name__)
+
+        # list of variables to be observed
+        for metric_name, metric_value in extra_metrics.iteritems():
+            self.metrics_names.append(metric_name)
+            self.metrics_tensors.append(metric_value)
 
         # prepare gradient updates and state updates
         self.optimizer = optimizers.get(optimizer)

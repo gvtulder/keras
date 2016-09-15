@@ -1131,12 +1131,17 @@ class Convolution3D(Layer):
         self.b_constraint = constraints.get(b_constraint)
 
         self.W = None
+        self.b = None
         self.reverse_weights = reverse_weights
 
         self.bias = bias
         self.input_spec = [InputSpec(ndim=5)]
         self.initial_weights = weights
         super(Convolution3D, self).__init__(**kwargs)
+
+    def reuse_b(self, b):
+        assert not self.built
+        self.b = b
 
     def reuse_W(self, W, reverse_weights=False):
         assert not self.built
@@ -1162,7 +1167,8 @@ class Convolution3D(Layer):
             self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
 
         if self.bias:
-            self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
+            if self.b is None:
+                self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
             self.trainable_weights = [self.W, self.b]
         else:
             self.trainable_weights = [self.W]

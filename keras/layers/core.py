@@ -678,6 +678,7 @@ class Dense(Layer):
         self.W_constraint = constraints.get(W_constraint)
         self.b_constraint = constraints.get(b_constraint)
 
+        self.b = None
         self.W = None
         self.reverse_weights = reverse_weights
 
@@ -688,6 +689,10 @@ class Dense(Layer):
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
         super(Dense, self).__init__(**kwargs)
+
+    def reuse_b(self, b):
+        assert not self.built
+        self.b = b
 
     def reuse_W(self, W, reverse_weights=False):
         assert not self.built
@@ -705,8 +710,9 @@ class Dense(Layer):
                                name='{}_W'.format(self.name))
 
         if self.bias:
-            self.b = K.zeros((self.output_dim,),
-                             name='{}_b'.format(self.name))
+            if self.b is None:
+                self.b = K.zeros((self.output_dim,),
+                                 name='{}_b'.format(self.name))
             self.trainable_weights = [self.W, self.b]
         else:
             self.trainable_weights = [self.W]

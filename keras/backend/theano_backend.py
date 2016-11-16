@@ -392,7 +392,70 @@ def cos(x):
     return T.cos(x)
 
 
+def _compute_bn_param_shuffle(ndim, reduction_axes):
+    # computes the dimshuffle pattern for the batch normalization
+    # parameters and the reverse dimshuffle pattern
+    param_shuffle = []
+    param_unshuffle = []
+    mapped_axes_count = 0
+    for axis in range(ndim):
+        if axis in reduction_axes:
+            param_shuffle.append('x')
+        else:
+            param_shuffle.append(mapped_axes_count)
+            param_unshuffle.append(axis)
+            mapped_axes_count =+ 1
+    return param_shuffle, param_unshuffle
+
+
 def normalize_batch_in_training(x, gamma, beta,
+                                reduction_axes, epsilon=0.0001):
+    '''Computes mean and std for batch then apply batch_normalization on batch.
+    '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_train is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_train'):
+        return _old_normalize_batch_in_training(x, gamma, beta, reduction_axes, epsilon)
+
+    param_shuffle, param_unshuffle = _compute_bn_param_shuffle(x.ndim, reduction_axes)
+
+    broadcast_beta = beta.dimshuffle(*param_shuffle)
+    broadcast_gamma = gamma.dimshuffle(*param_shuffle)
+
+    normed, broadcast_mean, broadcast_stdinv = T.nnet.bn.batch_normalization_train(
+        x, broadcast_gamma, broadcast_beta, reduction_axes, epsilon)
+
+    mean = broadcast_mean.dimshuffle(param_unshuffle)
+    stdinv = broadcast_stdinv.dimshuffle(param_unshuffle)
+    return normed, mean, T.inv(stdinv ** 2)
+
+
+def batch_normalization(x, mean, var, beta, gamma,
+                        reduction_axes, epsilon=0.0001):
+    '''Apply batch normalization on x given mean, var, beta and gamma.
+    '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_test is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_test'):
+        return _old_batch_normalization(x, mean, var, beta, gamma, reduction_axes, epsilon)
+
+    param_shuffle, param_unshuffle = _compute_bn_param_shuffle(x.ndim, reduction_axes)
+
+    broadcast_mean = mean.dimshuffle(*param_shuffle)
+    broadcast_var = var.dimshuffle(*param_shuffle)
+    broadcast_beta = beta.dimshuffle(*param_shuffle)
+    broadcast_gamma = gamma.dimshuffle(*param_shuffle)
+
+    normed = T.nnet.bn.batch_normalization_test(
+        x, broadcast_gamma, broadcast_beta, broadcast_mean, broadcast_var,
+        reduction_axes, epsilon)
+
+    return normed
+
+
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_train is deprecated
+def _old_normalize_batch_in_training(x, gamma, beta,
                                 reduction_axes, epsilon=0.0001):
     '''Computes mean and std for batch then apply batch_normalization on batch.
     '''
@@ -425,18 +488,13 @@ def normalize_batch_in_training(x, gamma, beta,
     return normed, mean, var
 
 
-def batch_normalization(x, mean, var, beta, gamma,
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_test is deprecated
+def _old_batch_normalization(x, mean, var, beta, gamma,
                         reduction_axes, epsilon=0.0001):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
-    param_shuffle = []
-    mapped_axes_count = 0
-    for axis in range(x.ndim):
-        if axis in reduction_axes:
-            param_shuffle.append('x')
-        else:
-            param_shuffle.append(mapped_axes_count)
-            mapped_axes_count =+ 1
+    param_shuffle, param_unshuffle = _compute_bn_param_shuffle(x.ndim, reduction_axes)
 
     mean = mean.dimshuffle(*param_shuffle)
     var = var.dimshuffle(*param_shuffle)

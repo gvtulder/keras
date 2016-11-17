@@ -110,9 +110,9 @@ def test_recurrent_convolutional():
                       'border_mode': "same"}
 
             layer = convolutional_recurrent.ConvLSTM2D(**kwargs)
-            layer.set_input(K.variable(np.ones(input.shape)),
-                            shape=input.shape)
-            K.eval(layer.output)
+            layer.build(input.shape)
+            output = layer(K.variable(np.ones(input.shape)))
+            K.eval(output)
 
             # check dropout
             layer_test(convolutional_recurrent.ConvLSTM2D,

@@ -226,9 +226,10 @@ class Recurrent(Layer):
                                              unroll=self.unroll,
                                              input_length=input_shape[1])
         if self.stateful:
-            self.updates = []
+            updates = []
             for i in range(len(states)):
-                self.updates.append((self.states[i], states[i]))
+                updates.append((self.states[i], states[i]))
+            self.add_updates(updates, x)
 
         if self.return_sequences:
             return outputs
@@ -325,6 +326,7 @@ class SimpleRNN(Recurrent):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+        self.built = True
 
     def reset_states(self):
         assert self.stateful, 'Layer must be stateful.'
@@ -383,7 +385,7 @@ class SimpleRNN(Recurrent):
             input_shape = self.input_spec[0].shape
             input_dim = input_shape[-1]
             ones = K.ones_like(K.reshape(x[:, 0, 0], (-1, 1)))
-            ones = K.tile(ones, (1, input_dim))
+            ones = K.tile(ones, (1, int(input_dim)))
             B_W = K.in_train_phase(K.dropout(ones, self.dropout_W), ones)
             constants.append(B_W)
         else:
@@ -515,6 +517,7 @@ class GRU(Recurrent):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+        self.built = True
 
     def reset_states(self):
         assert self.stateful, 'Layer must be stateful.'
@@ -597,7 +600,7 @@ class GRU(Recurrent):
             input_shape = self.input_spec[0].shape
             input_dim = input_shape[-1]
             ones = K.ones_like(K.reshape(x[:, 0, 0], (-1, 1)))
-            ones = K.tile(ones, (1, input_dim))
+            ones = K.tile(ones, (1, int(input_dim)))
             B_W = [K.in_train_phase(K.dropout(ones, self.dropout_W), ones) for _ in range(3)]
             constants.append(B_W)
         else:
@@ -745,6 +748,7 @@ class LSTM(Recurrent):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+        self.built = True
 
     def reset_states(self):
         assert self.stateful, 'Layer must be stateful.'
@@ -837,7 +841,7 @@ class LSTM(Recurrent):
             input_shape = self.input_spec[0].shape
             input_dim = input_shape[-1]
             ones = K.ones_like(K.reshape(x[:, 0, 0], (-1, 1)))
-            ones = K.tile(ones, (1, input_dim))
+            ones = K.tile(ones, (1, int(input_dim)))
             B_W = [K.in_train_phase(K.dropout(ones, self.dropout_W), ones) for _ in range(4)]
             constants.append(B_W)
         else:

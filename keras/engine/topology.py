@@ -307,8 +307,7 @@ class Layer(object):
                           'batch_input_shape',
                           'input_dtype',
                           'name',
-                          'trainable',
-                          'create_input_layer'}
+                          'trainable'}
         for kwarg in kwargs.keys():
             assert kwarg in allowed_kwargs, 'Keyword argument not understood: ' + kwarg
 
@@ -329,8 +328,6 @@ class Layer(object):
             self.batch_input_shape = batch_input_shape
             input_dtype = kwargs.get('input_dtype', K.floatx())
             self.input_dtype = input_dtype
-            if 'create_input_layer' in kwargs:
-                self.create_input_layer(batch_input_shape, input_dtype)
 
     @property
     def trainable_weights(self):
@@ -706,72 +703,16 @@ class Layer(object):
         return self._get_node_attribute_at_index(0, 'input_tensors',
                                                  'input')
 
-    def set_input(self, input_tensor, shape=None):
-        if len(self.inbound_nodes) > 1:
-            raise Exception('Cannot `set_input` for layer ' + self.name +
-                            ' because it has more than one inbound connection.')
-        if len(self.inbound_nodes) == 1:
-            # Check that the inbound node is an Input node.
-            if self.inbound_nodes[0].inbound_layers:
-                warnings.warn('You are manually setting the input for layer ' +
-                              self.name + ' but it is not an Input layer. '
-                              'This will cause part of your model '
-                              'to be disconnected.')
-        if self.outbound_nodes:
-            warnings.warn('You are manually setting the input for layer ' +
-                          self.name + ' but it has ' +
-                          str(len(self.outbound_nodes)) +
-                          ' outbound layers. '
-                          'This will cause part of your model '
-                          'to be disconnected.')
-        if hasattr(K, 'int_shape'):
-            # Auto-infered shape takes priority.
-            shape = K.int_shape(input_tensor)
-        elif not shape:
-            raise Exception('`set_input` needs to know the shape '
-                            'of the `input_tensor` it receives, but '
-                            'Keras was not able to infer it automatically.'
-                            ' Specify it via: '
-                            '`model.set_input(input_tensor, shape)`')
-        # Reset layer connections.
-        self.inbound_nodes = []
-        self.outbound_nodes = []
-        input_shape = tuple(shape)
-        self.build(input_shape=input_shape)
-
-        # Set Keras tensor metadata.
-        input_tensor._uses_learning_phase = False
-        input_tensor._keras_history = (None, 0, 0)
-        input_tensor._keras_shape = input_shape
-
-        output_tensors = to_list(self.call(input_tensor))
-        output_shapes = to_list(self.get_output_shape_for(input_shape))
-        output_masks = to_list(self.compute_mask(input_tensor, None))
-
-        for i, output_tensor in enumerate(output_tensors):
-            output_tensor._keras_history = (self, 0, i)
-            output_tensor._keras_shape = output_shapes[i]
-            output_tensor._uses_learning_phase = self.uses_learning_phase
-
-        # Create node.
-        Node(self,
-             inbound_layers=[],
-             node_indices=[],
-             tensor_indices=[],
-             input_tensors=[input_tensor],
-             output_tensors=output_tensors,
-             input_masks=[None],
-             output_masks=output_masks,
-             input_shapes=[input_shape],
-             output_shapes=output_shapes)
-
     @property
     def output(self):
         '''Retrieves the output tensor(s) of a layer (only applicable if
         the layer has exactly one inbound node, i.e. if it is connected
         to one incoming layer).
         '''
-        if len(self.inbound_nodes) != 1:
+        if len(self.inbound_nodes) == 0:
+            raise Exception('Layer ' + self.name +
+                            ' has no inbound nodes.')
+        if len(self.inbound_nodes) > 1:
             raise Exception('Layer ' + self.name +
                             ' has multiple inbound nodes, ' +
                             'hence the notion of "layer output" '
@@ -857,6 +798,33 @@ class Layer(object):
                             'the notion of "output shape" is ' +
                             'ill-defined for the layer. ' +
                             'Use `get_output_shape_at(node_index)` instead.')
+
+    def add_updates(self, updates, inputs):
+        # Update self.updates
+        if not hasattr(self, 'updates'):
+            self.updates = []
+        try:
+            self.updates += updates
+        except AttributeError:
+            pass
+        # Update self._per_input_updates
+        if not hasattr(self, '_per_input_updates'):
+            self._per_input_updates = {}
+        inputs = to_list(inputs)
+        updates = to_list(updates)
+        inputs_hash = ', '.join([str(abs(id(x))) for x in inputs])
+        if inputs_hash not in self._per_input_updates:
+            self._per_input_updates[inputs_hash] = []
+        self._per_input_updates[inputs_hash] += updates
+
+    def get_updates_for(self, inputs):
+        if not hasattr(self, '_per_input_updates'):
+            return []
+        inputs = to_list(inputs)
+        inputs_hash = ', '.join([str(abs(id(x))) for x in inputs])
+        if inputs_hash in self._per_input_updates:
+            return self._per_input_updates[inputs_hash]
+        return []
 
     @property
     def weights(self):
@@ -1909,11 +1877,13 @@ class Container(Layer):
         # based on layer names, because names can potentially
         # be changed at any point by the user
         # without the container being notified of it.
-        if index:
+        if index is not None:
             if len(self.layers) <= index:
                 raise Exception('Was asked to retrieve layer at index ' +
                                 str(index) + ' but model only has ' +
                                 str(len(self.layers)) + ' layers.')
+            else:
+                return self.layers[index]
         else:
             assert name, 'Provide either a layer name or layer index.'
         layer = None
@@ -1928,7 +1898,15 @@ class Container(Layer):
         updates = []
         for layer in self.layers:
             if hasattr(layer, 'updates'):
-                updates += layer.updates
+                if len(layer.inbound_nodes) == 1:
+                    updates += layer.updates
+                else:
+                    for node_index, node in enumerate(layer.inbound_nodes):
+                        node_key = layer.name + '_ib-' + str(node_index)
+                        if node_key in self.container_nodes:
+                            # The model owns this layer node.
+                            inputs = node.input_tensors
+                            updates += layer.get_updates_for(inputs)
         return updates
 
     @property
@@ -2217,6 +2195,10 @@ class Container(Layer):
                         computed_masks = [x[1] for x in computed_data]
                         output_tensors = to_list(layer.call(computed_tensors, computed_masks))
                         output_masks = to_list(layer.compute_mask(computed_tensors, computed_masks))
+
+                    # update model updates
+                    layer_inputs = [x[0] for x in computed_data]
+                    self.add_updates(layer.get_updates_for(layer_inputs), inputs)
 
                     # Update _keras_shape.
                     if all([hasattr(x, '_keras_shape') for x in computed_tensors]):

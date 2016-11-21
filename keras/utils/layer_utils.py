@@ -129,6 +129,7 @@ def convert_all_kernels_in_model(model):
         'Convolution3D',
         'AtrousConvolution2D',
         'Deconvolution2D',
+        'Deconvolution3D',
     }
     to_assign = []
     for layer in model.layers:

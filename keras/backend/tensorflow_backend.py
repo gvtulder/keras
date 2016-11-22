@@ -1743,6 +1743,9 @@ def deconv2d(x, kernel, output_shape, strides=(1, 1),
     if dim_ordering not in {'th', 'tf'}:
         raise ValueError('Unknown dim_ordering ' + str(dim_ordering))
 
+    if output_shape[0] is None:
+        output_shape = (tf.shape(x)[0],) + tuple(output_shape[1:])
+
     x = _preprocess_conv2d_input(x, dim_ordering)
     output_shape = _preprocess_deconv_output_shape(output_shape, dim_ordering)
     kernel = _preprocess_conv2d_kernel(kernel, dim_ordering)
@@ -1842,6 +1845,9 @@ def deconv3d(x, kernel, output_shape, strides=(1, 1, 1),
         dim_ordering = image_dim_ordering()
     if dim_ordering not in {'th', 'tf'}:
         raise ValueError('Unknown dim_ordering ' + str(dim_ordering))
+
+    if output_shape[0] is None:
+        output_shape = (tf.shape(x)[0],) + tuple(output_shape[1:])
 
     x = _preprocess_conv3d_input(x, dim_ordering)
     output_shape = _preprocess_deconv_output_shape(output_shape, dim_ordering)

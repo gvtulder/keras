@@ -184,7 +184,11 @@ def variable(value, dtype=_FLOATX, name=None):
 
 
 def _initialize_variables():
-    variables = tf.all_variables()
+    if hasattr(tf, 'global_variables'):
+        variables = tf.global_variables()
+    else:
+        variables = tf.all_variables()
+
     uninitialized_variables = []
     for v in variables:
         if not hasattr(v, '_keras_initialized') or not v._keras_initialized:
@@ -192,8 +196,10 @@ def _initialize_variables():
             v._keras_initialized = True
     if uninitialized_variables:
         sess = get_session()
-        sess.run(tf.initialize_variables(uninitialized_variables))
-
+        if hasattr(tf, 'variables_initializer'):
+            sess.run(tf.variables_initializer(uninitialized_variables))
+        else:
+            sess.run(tf.initialize_variables(uninitialized_variables))
 
 def placeholder(shape=None, ndim=None, dtype=_FLOATX, sparse=False, name=None):
     '''Instantiates a placeholder.
@@ -1300,6 +1306,8 @@ def rnn(step_function, inputs, initial_states,
                 output, new_states = step_function(current_input,
                                                    tuple(states) +
                                                    tuple(constants))
+                for state, new_state in zip(states, new_states):
+                    new_state.set_shape(state.get_shape())
                 tiled_mask_t = tf.tile(mask_t, tf.pack([1, tf.shape(output)[1]]))
                 output = tf.select(tiled_mask_t, output, states[0])
                 new_states = [tf.select(tiled_mask_t, new_states[i], states[i]) for i in range(len(states))]
@@ -1311,6 +1319,8 @@ def rnn(step_function, inputs, initial_states,
                 output, new_states = step_function(current_input,
                                                    tuple(states) +
                                                    tuple(constants))
+                for state, new_state in zip(states, new_states):
+                    new_state.set_shape(state.get_shape())
                 output_ta_t = output_ta_t.write(time, output)
                 return (time + 1, output_ta_t) + tuple(new_states)
 
@@ -2031,3 +2041,52 @@ def ctc_decode(y_pred, input_length, greedy=True, beam_width=100,
                      for st in decoded]
 
     return (decoded_dense, log_prob)
+
+
+# HIGH ORDER FUNCTIONS
+
+def map_fn(fn, elems, name=None):
+    '''Map the function fn over the elements elems and return the outputs.
+
+    # Arguments
+        fn: Callable that will be called upon each element in elems
+        elems: tensor
+        name: A string name for the map node in the graph
+
+    # Returns
+        Tensor with first dimension equal to the elems and second depending on
+        fn
+    '''
+    return tf.map_fn(fn, elems, name=name)
+
+
+def foldl(fn, elems, initializer=None, name=None):
+    '''Reduce elems using fn to combine them from left to right.
+
+    # Arguments
+        fn: Callable that will be called upon each element in elems and an
+            accumulator, for instance lambda acc, x: acc + x
+        elems: tensor
+        initializer: The first value used (elems[0] in case of None)
+        name: A string name for the foldl node in the graph
+
+    # Returns
+        Same type and shape as initializer
+    '''
+    return tf.foldl(fn, elems, initializer=initializer, name=name)
+
+
+def foldr(fn, elems, initializer=None, name=None):
+    '''Reduce elems using fn to combine them from right to left.
+
+    # Arguments
+        fn: Callable that will be called upon each element in elems and an
+            accumulator, for instance lambda acc, x: acc + x
+        elems: tensor
+        initializer: The first value used (elems[-1] in case of None)
+        name: A string name for the foldr node in the graph
+
+    # Returns
+        Same type and shape as initializer
+    '''
+    return tf.foldr(fn, elems, initializer=initializer, name=name)

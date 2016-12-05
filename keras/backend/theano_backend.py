@@ -13,6 +13,7 @@ try:
 except ImportError:
     from theano.sandbox.softsign import softsign as T_softsign
 import inspect
+import warnings
 import numpy as np
 from .common import _FLOATX, _EPSILON, image_dim_ordering
 py_all = all
@@ -394,6 +395,36 @@ def cos(x):
 
 def normalize_batch_in_training(x, gamma, beta,
                                 reduction_axes, epsilon=0.0001):
+    '''Computes mean and std for batch then apply batch normalization on batch.
+    '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_train is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_train'):
+        return _old_normalize_batch_in_training(x, gamma, beta, reduction_axes, epsilon)
+
+    normed, mean, stdinv = T.nnet.bn.batch_normalization_train(
+        x, gamma, beta, reduction_axes, epsilon)
+
+    return normed, mean, T.inv(stdinv ** 2)
+
+
+def normalize_batch_in_testing(x, mean, var, beta, gamma,
+                               reduction_axes, epsilon=0.0001):
+    '''Apply batch normalization on x given mean, var, beta and gamma.
+    '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_test is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_test'):
+        return _old_normalize_batch_in_testing(x, mean, var, beta, gamma, reduction_axes, epsilon)
+
+    return T.nnet.bn.batch_normalization_test(
+        x, gamma, beta, mean, var, reduction_axes, epsilon)
+
+
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_train is deprecated
+def _old_normalize_batch_in_training(x, gamma, beta,
+                                     reduction_axes, epsilon=0.0001):
     '''Computes mean and std for batch then apply batch_normalization on batch.
     '''
     dev = theano.config.device
@@ -420,19 +451,31 @@ def normalize_batch_in_training(x, gamma, beta,
             target_shape.append(x.shape[axis])
     target_shape = T.stack(*target_shape)
 
-    broadcast_mean = T.reshape(mean, target_shape)
-    broadcast_var = T.reshape(var, target_shape)
-    broadcast_beta = T.reshape(beta, target_shape)
-    broadcast_gamma = T.reshape(gamma, target_shape)
-    normed = batch_normalization(x, broadcast_mean, broadcast_var,
-                                 broadcast_beta, broadcast_gamma,
-                                 epsilon)
+    normed = normalize_batch_in_testing(x, mean, var, beta, gamma,
+                                        reduction_axes, epsilon)
     return normed, mean, var
 
 
-def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_test is deprecated
+def _old_normalize_batch_in_testing(x, mean, var, beta, gamma,
+                                    reduction_axes, epsilon=0.0001):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
+    param_shuffle = []
+    mapped_axes_count = 0
+    for axis in range(x.ndim):
+        if axis in reduction_axes:
+            param_shuffle.append('x')
+        else:
+            param_shuffle.append(mapped_axes_count)
+            mapped_axes_count =+ 1
+
+    mean = mean.dimshuffle(*param_shuffle)
+    var = var.dimshuffle(*param_shuffle)
+    beta = beta.dimshuffle(*param_shuffle)
+    gamma = gamma.dimshuffle(*param_shuffle)
+
     ndim = x.ndim
     dev = theano.config.device
     use_cudnn = ndim < 5 and (dev.startswith('cuda') or dev.startswith('gpu'))
@@ -459,6 +502,22 @@ def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
             pass
     return T.nnet.bn.batch_normalization(x, gamma, beta, mean, sqrt(var + epsilon),
                                          mode='high_mem')
+
+
+def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
+    '''Apply batch normalization on x given mean, var, beta and gamma.
+
+    This function is deprecated. Please use normalize_batch_in_testing instead.
+    '''
+    warnings.warn('The K.batch_normalization function is deprecated. '
+                  'Please use K.normalize_batch_in_testing instead.')
+    reduction_axes = [i for (i, b) in enumerate(mean.broadcastable) if b]
+    non_reduction_axes = [i for i in range(x.ndim) if i not in reduction_axes]
+    mean = mean.dimshuffle(non_reduction_axes)
+    var = var.dimshuffle(non_reduction_axes)
+    beta = beta.dimshuffle(non_reduction_axes)
+    gamma = gamma.dimshuffle(non_reduction_axes)
+    return normalize_batch_in_testing(x, mean, var, beta, gamma, reduction_axes, epsilon)
 
 
 # SHAPE OPERATIONS

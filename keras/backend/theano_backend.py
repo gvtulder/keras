@@ -420,29 +420,19 @@ def normalize_batch_in_training(x, gamma, beta,
             target_shape.append(x.shape[axis])
     target_shape = T.stack(*target_shape)
 
-    normed = batch_normalization(x, mean, var, beta, gamma,
-                                 reduction_axes, epsilon)
+    broadcast_mean = T.reshape(mean, target_shape)
+    broadcast_var = T.reshape(var, target_shape)
+    broadcast_beta = T.reshape(beta, target_shape)
+    broadcast_gamma = T.reshape(gamma, target_shape)
+    normed = batch_normalization(x, broadcast_mean, broadcast_var,
+                                 broadcast_beta, broadcast_gamma,
+                                 epsilon)
     return normed, mean, var
 
 
-def batch_normalization(x, mean, var, beta, gamma,
-                        reduction_axes, epsilon=0.0001):
+def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
-    param_shuffle = []
-    mapped_axes_count = 0
-    for axis in range(x.ndim):
-        if axis in reduction_axes:
-            param_shuffle.append('x')
-        else:
-            param_shuffle.append(mapped_axes_count)
-            mapped_axes_count =+ 1
-
-    mean = mean.dimshuffle(*param_shuffle)
-    var = var.dimshuffle(*param_shuffle)
-    beta = beta.dimshuffle(*param_shuffle)
-    gamma = gamma.dimshuffle(*param_shuffle)
-
     ndim = x.ndim
     dev = theano.config.device
     use_cudnn = ndim < 5 and (dev.startswith('cuda') or dev.startswith('gpu'))

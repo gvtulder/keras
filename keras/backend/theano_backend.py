@@ -397,6 +397,36 @@ def normalize_batch_in_training(x, gamma, beta,
                                 reduction_axes, epsilon=0.0001):
     '''Computes mean and std for batch then apply batch normalization on batch.
     '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_train is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_train'):
+        return _old_normalize_batch_in_training(x, gamma, beta, reduction_axes, epsilon)
+
+    normed, mean, stdinv = T.nnet.bn.batch_normalization_train(
+        x, gamma, beta, reduction_axes, epsilon)
+
+    return normed, mean, T.inv(stdinv ** 2)
+
+
+def normalize_batch_in_testing(x, mean, var, beta, gamma,
+                               reduction_axes, epsilon=0.0001):
+    '''Apply batch normalization on x given mean, var, beta and gamma.
+    '''
+    # TODO remove this if statement when Theano without
+    # T.nnet.bn.batch_normalization_test is deprecated
+    if not hasattr(T.nnet.bn, 'batch_normalization_test'):
+        return _old_normalize_batch_in_testing(x, mean, var, beta, gamma, reduction_axes, epsilon)
+
+    return T.nnet.bn.batch_normalization_test(
+        x, gamma, beta, mean, var, reduction_axes, epsilon)
+
+
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_train is deprecated
+def _old_normalize_batch_in_training(x, gamma, beta,
+                                     reduction_axes, epsilon=0.0001):
+    '''Computes mean and std for batch then apply batch_normalization on batch.
+    '''
     dev = theano.config.device
     use_cudnn = ndim(x) < 5 and reduction_axes == [0, 2, 3] and (dev.startswith('cuda') or dev.startswith('gpu'))
     if use_cudnn:
@@ -426,8 +456,10 @@ def normalize_batch_in_training(x, gamma, beta,
     return normed, mean, var
 
 
-def normalize_batch_in_testing(x, mean, var, beta, gamma,
-                               reduction_axes, epsilon=0.0001):
+# TODO remove this function when Theano without
+# T.nnet.bn.batch_normalization_test is deprecated
+def _old_normalize_batch_in_testing(x, mean, var, beta, gamma,
+                                    reduction_axes, epsilon=0.0001):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
     param_shuffle = []

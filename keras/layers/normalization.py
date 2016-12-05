@@ -112,8 +112,6 @@ class BatchNormalization(Layer):
 
             reduction_axes = list(range(len(input_shape)))
             del reduction_axes[self.axis]
-            broadcast_shape = [1] * len(input_shape)
-            broadcast_shape[self.axis] = input_shape[self.axis]
 
             x_normed, mean, std = K.normalize_batch_in_training(
                 x, self.gamma, self.beta, reduction_axes,
@@ -123,21 +121,11 @@ class BatchNormalization(Layer):
                 self.add_updates([K.moving_average_update(self.running_mean, mean, self.momentum),
                                   K.moving_average_update(self.running_std, std, self.momentum)], x)
 
-                if K.backend() == 'tensorflow' and sorted(reduction_axes) == range(K.ndim(x))[:-1]:
-                    x_normed_running = K.batch_normalization(
-                        x, self.running_mean, self.running_std,
-                        self.beta, self.gamma,
-                        epsilon=self.epsilon)
-                else:
-                    # need broadcasting
-                    broadcast_running_mean = K.reshape(self.running_mean, broadcast_shape)
-                    broadcast_running_std = K.reshape(self.running_std, broadcast_shape)
-                    broadcast_beta = K.reshape(self.beta, broadcast_shape)
-                    broadcast_gamma = K.reshape(self.gamma, broadcast_shape)
-                    x_normed_running = K.batch_normalization(
-                        x, broadcast_running_mean, broadcast_running_std,
-                        broadcast_beta, broadcast_gamma,
-                        epsilon=self.epsilon)
+                x_normed_running = K.normalize_batch_in_testing(
+                    x, self.running_mean, self.running_std,
+                    self.beta, self.gamma,
+                    reduction_axes=reduction_axes,
+                    epsilon=self.epsilon)
 
                 # pick the normalized form of x corresponding to the training phase
                 x_normed = K.in_train_phase(x_normed, x_normed_running)

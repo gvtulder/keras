@@ -1307,7 +1307,7 @@ class Deconvolution3D(Convolution3D):
 
         # apply a 3x3x3 transposed convolution with stride 2x2x2 and 3 output filters on a 12x12x12 volume:
         model = Sequential()
-        model.add(Deconvolution2D(3, 3, 3, 3, output_shape=(None, 3, 25, 25, 25), subsample=(2, 2, 2), border_mode='valid', input_shape=(3, 12, 12, 12)))
+        model.add(Deconvolution3D(3, 3, 3, 3, output_shape=(None, 3, 25, 25, 25), subsample=(2, 2, 2), border_mode='valid', input_shape=(3, 12, 12, 12)))
         model.summary()
 
         # we can predict with the model and print the shape of the array.

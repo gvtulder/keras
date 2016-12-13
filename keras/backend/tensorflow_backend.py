@@ -875,6 +875,25 @@ def repeat(x, n):
     return tf.tile(x, pattern)
 
 
+def arange(start, stop=None, step=1, dtype='int32'):
+    '''Creates a 1-D tensor containing a sequence of integers.
+
+    The function arguments use the same convention as
+    Theano's arange: if only one argument is provided,
+    it is in fact the "stop" argument.
+
+    The default type of the returned tensor is 'int32' to
+    match TensorFlow's default.
+    '''
+    # Match the behavior of numpy and Theano by returning an empty seqence.
+    if stop is None and start < 0:
+        start = 0
+    result = tf.range(start, limit=stop, delta=step, name='arange')
+    if dtype != 'int32':
+        result = cast(result, dtype)
+    return result
+
+
 def tile(x, n):
     if not hasattr(n, 'shape') and not hasattr(n, '__len__') and not hasattr(n, '_shape'):
         n = [n]
@@ -1599,11 +1618,9 @@ def in_top_k(predictions, targets, k):
 
 # CONVOLUTIONS
 
-def _preprocess_deconv_output_shape(x, shape, dim_ordering):
+def _preprocess_deconv_output_shape(shape, dim_ordering):
     if dim_ordering == 'th':
         shape = (shape[0],) + tuple(shape[2:]) + (shape[1],)
-    if shape[0] is None:
-        shape = (tf.shape(x)[0],) + tuple(shape[1:])
     return shape
 
 
@@ -1756,8 +1773,11 @@ def deconv2d(x, kernel, output_shape, strides=(1, 1),
     if dim_ordering not in {'th', 'tf'}:
         raise ValueError('Unknown dim_ordering ' + str(dim_ordering))
 
+    if output_shape[0] is None:
+        output_shape = (tf.shape(x)[0],) + tuple(output_shape[1:])
+
     x = _preprocess_conv2d_input(x, dim_ordering)
-    output_shape = _preprocess_deconv_output_shape(x, output_shape, dim_ordering)
+    output_shape = _preprocess_deconv_output_shape(output_shape, dim_ordering)
     kernel = _preprocess_conv2d_kernel(kernel, dim_ordering)
     kernel = tf.transpose(kernel, (0, 1, 3, 2))
     padding = _preprocess_border_mode(border_mode)
@@ -1856,8 +1876,11 @@ def deconv3d(x, kernel, output_shape, strides=(1, 1, 1),
     if dim_ordering not in {'th', 'tf'}:
         raise ValueError('Unknown dim_ordering ' + str(dim_ordering))
 
+    if output_shape[0] is None:
+        output_shape = (tf.shape(x)[0],) + tuple(output_shape[1:])
+
     x = _preprocess_conv3d_input(x, dim_ordering)
-    output_shape = _preprocess_deconv_output_shape(x, output_shape, dim_ordering)
+    output_shape = _preprocess_deconv_output_shape(output_shape, dim_ordering)
     kernel = _preprocess_conv3d_kernel(kernel, dim_ordering)
     kernel = tf.transpose(kernel, (0, 1, 3, 4, 2))
     padding = _preprocess_border_mode(border_mode)

@@ -13,7 +13,6 @@ try:
 except ImportError:
     from theano.sandbox.softsign import softsign as T_softsign
 import inspect
-import warnings
 import numpy as np
 from .common import _FLOATX, _EPSILON, image_dim_ordering
 py_all = all
@@ -280,8 +279,11 @@ def prod(x, axis=None, keepdims=False):
 
 
 def mean(x, axis=None, keepdims=False):
+    '''Mean of a tensor, alongside the specified axis.
+    '''
     dtype = None
-    if 'int' in x.dtype:
+    # bool is available since theano v0.9dev
+    if 'int' in x.dtype or x.dtype == 'bool':
         dtype = _FLOATX
     return T.mean(x, axis=axis, keepdims=keepdims, dtype=dtype)
 
@@ -394,8 +396,8 @@ def cos(x):
 
 
 def normalize_batch_in_training(x, gamma, beta,
-                                reduction_axes, epsilon=0.0001):
-    '''Computes mean and std for batch then apply batch normalization on batch.
+                                reduction_axes, epsilon=1e-3):
+    '''Computes mean and std for batch then apply batch_normalization on batch.
     '''
     # TODO remove this if statement when Theano without
     # T.nnet.bn.batch_normalization_train is deprecated
@@ -408,14 +410,19 @@ def normalize_batch_in_training(x, gamma, beta,
     return normed, mean, T.inv(stdinv ** 2)
 
 
-def normalize_batch_in_testing(x, mean, var, beta, gamma,
-                               reduction_axes, epsilon=0.0001):
+def batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
     # TODO remove this if statement when Theano without
     # T.nnet.bn.batch_normalization_test is deprecated
     if not hasattr(T.nnet.bn, 'batch_normalization_test'):
-        return _old_normalize_batch_in_testing(x, mean, var, beta, gamma, reduction_axes, epsilon)
+        return _old_batch_normalization(x, mean, var, beta, gamma, epsilon)
+
+    if mean.ndim == 1:
+        # based on TensorFlow's default: normalize along rightmost dimension
+        reduction_axes = range(x.ndim - 1)
+    else:
+        reduction_axes = [i for i in range(x.ndim) if mean.broadcastable[i]]
 
     return T.nnet.bn.batch_normalization_test(
         x, gamma, beta, mean, var, reduction_axes, epsilon)
@@ -424,7 +431,7 @@ def normalize_batch_in_testing(x, mean, var, beta, gamma,
 # TODO remove this function when Theano without
 # T.nnet.bn.batch_normalization_train is deprecated
 def _old_normalize_batch_in_training(x, gamma, beta,
-                                     reduction_axes, epsilon=0.0001):
+                                     reduction_axes, epsilon=1e-3):
     '''Computes mean and std for batch then apply batch_normalization on batch.
     '''
     dev = theano.config.device
@@ -451,30 +458,30 @@ def _old_normalize_batch_in_training(x, gamma, beta,
             target_shape.append(x.shape[axis])
     target_shape = T.stack(*target_shape)
 
-    normed = normalize_batch_in_testing(x, mean, var, beta, gamma,
-                                        reduction_axes, epsilon)
+    broadcast_mean = T.reshape(mean, target_shape)
+    broadcast_var = T.reshape(var, target_shape)
+    broadcast_beta = T.reshape(beta, target_shape)
+    broadcast_gamma = T.reshape(gamma, target_shape)
+    normed = batch_normalization(x, broadcast_mean, broadcast_var,
+                                 broadcast_beta, broadcast_gamma,
+                                 epsilon)
     return normed, mean, var
 
 
-# TODO remove this function when Theano without
+# TODO remove this if statement when Theano without
 # T.nnet.bn.batch_normalization_test is deprecated
-def _old_normalize_batch_in_testing(x, mean, var, beta, gamma,
-                                    reduction_axes, epsilon=0.0001):
+def _old_batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
-    param_shuffle = []
-    mapped_axes_count = 0
-    for axis in range(x.ndim):
-        if axis in reduction_axes:
-            param_shuffle.append('x')
-        else:
-            param_shuffle.append(mapped_axes_count)
-            mapped_axes_count =+ 1
-
-    mean = mean.dimshuffle(*param_shuffle)
-    var = var.dimshuffle(*param_shuffle)
-    beta = beta.dimshuffle(*param_shuffle)
-    gamma = gamma.dimshuffle(*param_shuffle)
+    if mean.ndim == 1 and x.ndim > 1:
+        # in TensorFlow's batch_normalization, if the parameters are vectors
+        # the batch normalization should be applied along the rightmost axis.
+        # Theano expects the parameters to always have x.ndim dimensions.
+        shuffle_pattern = ['x'] * (x.ndim - 1) + [0]
+        mean = mean.dimshuffle(shuffle_pattern)
+        var = var.dimshuffle(shuffle_pattern)
+        beta = beta.dimshuffle(shuffle_pattern)
+        gamma = gamma.dimshuffle(shuffle_pattern)
 
     ndim = x.ndim
     dev = theano.config.device
@@ -502,22 +509,6 @@ def _old_normalize_batch_in_testing(x, mean, var, beta, gamma,
             pass
     return T.nnet.bn.batch_normalization(x, gamma, beta, mean, sqrt(var + epsilon),
                                          mode='high_mem')
-
-
-def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
-    '''Apply batch normalization on x given mean, var, beta and gamma.
-
-    This function is deprecated. Please use normalize_batch_in_testing instead.
-    '''
-    warnings.warn('The K.batch_normalization function is deprecated. '
-                  'Please use K.normalize_batch_in_testing instead.')
-    reduction_axes = [i for (i, b) in enumerate(mean.broadcastable) if b]
-    non_reduction_axes = [i for i in range(x.ndim) if i not in reduction_axes]
-    mean = mean.dimshuffle(non_reduction_axes)
-    var = var.dimshuffle(non_reduction_axes)
-    beta = beta.dimshuffle(non_reduction_axes)
-    gamma = gamma.dimshuffle(non_reduction_axes)
-    return normalize_batch_in_testing(x, mean, var, beta, gamma, reduction_axes, epsilon)
 
 
 # SHAPE OPERATIONS
@@ -1638,9 +1629,11 @@ def pool2d(x, pool_size, strides=(1, 1), border_mode='valid',
     if dim_ordering not in {'th', 'tf'}:
         raise Exception('Unknown dim_ordering ' + str(dim_ordering))
 
+    assert pool_size[0] >= 1 and pool_size[1] >= 1
+
     if border_mode == 'same':
-        w_pad = pool_size[0] - 2 if pool_size[0] % 2 == 1 else pool_size[0] - 1
-        h_pad = pool_size[1] - 2 if pool_size[1] % 2 == 1 else pool_size[1] - 1
+        w_pad = pool_size[0] - 2 if pool_size[0] > 2 and pool_size[0] % 2 == 1 else pool_size[0] - 1
+        h_pad = pool_size[1] - 2 if pool_size[1] > 2 and pool_size[1] % 2 == 1 else pool_size[1] - 1
         padding = (w_pad, h_pad)
     elif border_mode == 'valid':
         padding = (0, 0)

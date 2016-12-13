@@ -360,8 +360,12 @@ def update_sub(x, decrement):
 
 
 def moving_average_update(variable, value, momentum):
-    return moving_averages.assign_moving_average(
-        variable, value, momentum)
+    try:
+        return moving_averages.assign_moving_average(
+            variable, value, momentum, zero_debias=False)
+    except TypeError:
+        return moving_averages.assign_moving_average(
+            variable, value, momentum)
 
 
 # LINEAR ALGEBRA
@@ -698,8 +702,8 @@ def cos(x):
 
 
 def normalize_batch_in_training(x, gamma, beta,
-                                reduction_axes, epsilon=0.0001):
-    '''Compute mean and std for batch then apply batch normalization on batch.
+                                reduction_axes, epsilon=1e-3):
+    '''Compute mean and std for batch then apply batch_normalization on batch.
     '''
     mean, var = tf.nn.moments(x, reduction_axes,
                               shift=None, name=None, keep_dims=False)
@@ -727,41 +731,11 @@ def normalize_batch_in_training(x, gamma, beta,
     return normed, mean, var
 
 
-def normalize_batch_in_testing(x, mean, var, beta, gamma,
-                               reduction_axes, epsilon=0.0001):
-    '''Apply batch normalization on x given mean, var, beta and gamma:
-    '''
-    if sorted(reduction_axes) == range(ndim(x))[:-1]:
-        normed = tf.nn.batch_normalization(x, mean, var,
-                                           beta, gamma,
-                                           epsilon)
-    else:
-        # need broadcasting
-        target_shape = []
-        for axis in range(ndim(x)):
-            if axis in reduction_axes:
-                target_shape.append(1)
-            else:
-                target_shape.append(tf.shape(x)[axis])
-        target_shape = tf.pack(target_shape)
-
-        broadcast_mean = tf.reshape(mean, target_shape)
-        broadcast_var = tf.reshape(var, target_shape)
-        broadcast_gamma = tf.reshape(gamma, target_shape)
-        broadcast_beta = tf.reshape(beta, target_shape)
-        normed = tf.nn.batch_normalization(x, broadcast_mean, broadcast_var,
-                                           broadcast_beta, broadcast_gamma,
-                                           epsilon)
-    return normed
-
-
-def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
+def batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
     '''Apply batch normalization on x given mean, var, beta and gamma:
 
     output = (x - mean) / (sqrt(var) + epsilon) * gamma + beta
     '''
-    warnings.warn('The K.batch_normalization function is deprecated. '
-                  'Please use K.normalize_batch_in_testing instead.')
     return tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon)
 
 

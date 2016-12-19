@@ -1100,7 +1100,8 @@ class Convolution3D(Layer):
                  border_mode='valid', subsample=(1, 1, 1), dim_ordering='default',
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
-                 bias=True, **kwargs):
+                 reverse_weights=False, bias=True, **kwargs):
+        assert not reverse_weights
         if dim_ordering == 'default':
             dim_ordering = K.image_dim_ordering()
 

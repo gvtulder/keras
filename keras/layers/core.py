@@ -708,7 +708,8 @@ class Dense(Layer):
                  activation=None, weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
-                 bias=True, input_dim=None, **kwargs):
+                 reverse_weights=False, bias=True, input_dim=None, **kwargs):
+        assert not reverse_weights
         self.init = initializations.get(init)
         self.activation = activations.get(activation)
         self.output_dim = output_dim

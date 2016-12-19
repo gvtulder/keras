@@ -315,6 +315,16 @@ def test_lambda():
     config = ld.get_config()
     ld = layer_from_config({'class_name': 'Lambda', 'config': config})
 
+    # test serialization with a lambda calling a custom function
+    def clean_f():
+        def f(x):
+            return x + 1
+    f = clean_f()
+
+    ld = Lambda(lambda x: f(x))
+    config = ld.get_config()
+    ld = layer_from_config({'class_name': 'Lambda', 'config': config})
+
 
 @keras_test
 def test_dense():

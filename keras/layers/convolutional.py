@@ -1126,7 +1126,7 @@ class Convolution3D(Layer):
                  border_mode='valid', subsample=(1, 1, 1), dim_ordering='default',
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
-                 reverse_weights=False, bias=True, **kwargs):
+                 bias=True, **kwargs):
         if dim_ordering == 'default':
             dim_ordering = K.image_dim_ordering()
 
@@ -1150,23 +1150,10 @@ class Convolution3D(Layer):
         self.W_constraint = constraints.get(W_constraint)
         self.b_constraint = constraints.get(b_constraint)
 
-        self.W = None
-        self.b = None
-        self.reverse_weights = reverse_weights
-
         self.bias = bias
         self.input_spec = [InputSpec(ndim=5)]
         self.initial_weights = weights
         super(Convolution3D, self).__init__(**kwargs)
-
-    def reuse_b(self, b):
-        assert not self.built
-        self.b = b
-
-    def reuse_W(self, W, reverse_weights=False):
-        assert not self.built
-        self.W = W
-        self.reverse_weights = reverse_weights
 
     def build(self, input_shape):
         assert len(input_shape) == 5
@@ -1183,12 +1170,9 @@ class Convolution3D(Layer):
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
 
-        if self.W is None:
-            self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
-
+        self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
         if self.bias:
-            if self.b is None:
-                self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
+            self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
             self.trainable_weights = [self.W, self.b]
         else:
             self.trainable_weights = [self.W]
@@ -1245,12 +1229,7 @@ class Convolution3D(Layer):
 
     def call(self, x, mask=None):
         input_shape = self.input_spec[0].shape
-        W_for_conv = self.W
-        if self.reverse_weights:
-            assert self.dim_ordering == 'th'
-            # swap input channel / output channel dimensions and flip the filters
-            W_for_conv = W_for_conv.dimshuffle(1, 0, 2, 3, 4)[:, :, ::-1, ::-1, ::-1]
-        output = K.conv3d(x, W_for_conv, strides=self.subsample,
+        output = K.conv3d(x, self.W, strides=self.subsample,
                           border_mode=self.border_mode,
                           dim_ordering=self.dim_ordering,
                           volume_shape=input_shape,
@@ -1280,7 +1259,6 @@ class Convolution3D(Layer):
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
                   'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
                   'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'reverse_weights': self.reverse_weights,
                   'bias': self.bias}
         base_config = super(Convolution3D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
